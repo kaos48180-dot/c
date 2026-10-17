@@ -1,0 +1,98 @@
+name: Build EchoStrike (both APKs)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Optional: publish a GitHub Release with this tag (example v1.0). Leave empty to only build."
+        required: false
+        default: ""
+      server_host:
+        description: "Optional: cloud server name, example my-app.fly.dev"
+        required: false
+        default: ""
+  push:
+    paths:
+      - "*.zip"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Unzip the uploaded project
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="$(find . -maxdepth 2 -type f -name '*.zip' -not -path './.git/*' | head -n1)"
+          if [ -z "$ZIP" ]; then echo "No .zip file found in the repository. Upload the EchoStrike zip first."; exit 1; fi
+          echo "Using $ZIP"
+          mkdir -p "$RUNNER_TEMP/src"
+          unzip -q "$ZIP" -d "$RUNNER_TEMP/src"
+          SETTINGS="$(find "$RUNNER_TEMP/src" -name settings.gradle -not -path '*/node_modules/*' | head -n1)"
+          if [ -z "$SETTINGS" ]; then echo "settings.gradle not found inside the zip."; exit 1; fi
+          echo "PROJECT_DIR=$(dirname "$SETTINGS")" >> "$GITHUB_ENV"
+
+      - name: Choose the cloud server name
+        shell: bash
+        env:
+          INPUT_HOST: ${{ github.event.inputs.server_host }}
+          VAR_HOST: ${{ vars.ECHO_SERVER_HOST }}
+        run: |
+          HOST="${INPUT_HOST:-$VAR_HOST}"
+          if [ -z "$HOST" ] && [ -f "$PROJECT_DIR/fly.toml" ]; then
+            APP="$(sed -n 's/^app = "\(.*\)"/\1/p' "$PROJECT_DIR/fly.toml" | head -n1)"
+            [ -n "$APP" ] && HOST="$APP.fly.dev"
+          fi
+          echo "ECHO_SERVER_HOST=$HOST" >> "$GITHUB_ENV"
+          echo "Cloud server name: ${HOST:-none (LAN play only)}"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.1.1"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 34
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Build both APKs
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle --no-daemon --stacktrace :app:assembleDebug :developer-console:assembleDebug
+
+      - name: Collect the APKs
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "$PROJECT_DIR"/app/build/outputs/apk/debug/*.apk out/EchoStrike-Player.apk
+          cp "$PROJECT_DIR"/developer-console/build/outputs/apk/debug/*.apk out/EchoStrike-Developer-Console.apk
+          ls -l out
+
+      - name: Upload both APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: EchoStrike-APKs
+          path: out/*.apk
+          if-no-files-found: error
+
+      - name: Publish a release (only when a tag was typed)
+        if: ${{ github.event.inputs.release_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.release_tag }}
+        run: |
+          gh release create "$TAG" out/*.apk --title "EchoStrike $TAG" \
+            --notes "Player app and Developer Console. Install both from the same release."
