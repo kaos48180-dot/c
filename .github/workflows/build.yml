@@ -69,9 +69,15 @@ jobs:
           yes | "$SDKM" --licenses >/dev/null 2>&1 || true
           "$SDKM" "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Build all three APKs
+      - name: Build Player + Developer Console
         working-directory: ${{ env.PROJECT_DIR }}
-        run: gradle --no-daemon --stacktrace :app:assembleDebug :developer-console:assembleDebug :server-app:assembleDebug
+        run: gradle --no-daemon --stacktrace :app:assembleDebug :developer-console:assembleDebug
+
+      - name: Build Server app
+        id: server
+        continue-on-error: true
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle --no-daemon --stacktrace :server-app:assembleDebug
 
       - name: Collect the APKs
         shell: bash
@@ -79,7 +85,9 @@ jobs:
           mkdir -p out
           cp "$PROJECT_DIR"/app/build/outputs/apk/debug/*.apk out/EchoStrike-Player.apk
           cp "$PROJECT_DIR"/developer-console/build/outputs/apk/debug/*.apk out/EchoStrike-Developer-Console.apk
-          cp "$PROJECT_DIR"/server-app/build/outputs/apk/debug/*.apk out/EchoStrike-Server.apk
+          if ls "$PROJECT_DIR"/server-app/build/outputs/apk/debug/*.apk >/dev/null 2>&1; then
+            cp "$PROJECT_DIR"/server-app/build/outputs/apk/debug/*.apk out/EchoStrike-Server.apk
+          fi
           ls -l out
 
       - name: Upload the APKs
@@ -97,3 +105,10 @@ jobs:
         run: |
           gh release create "$TAG" out/*.apk --title "EchoStrike $TAG" \
             --notes "Player = the game. Server = run on a second phone or tablet to host the world. Developer Console = optional admin tool. All three are signed with the same key, so they install over older versions."
+
+      - name: Tell me if the Server app failed
+        if: ${{ steps.server.outcome == 'failure' }}
+        run: |
+          echo "The Server app did not build. The Player and Developer Console APKs were still saved."
+          echo "Open the 'Build Server app' step above, copy the red error lines and send them to Claude."
+          exit 1
