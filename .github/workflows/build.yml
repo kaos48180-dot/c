@@ -1,4 +1,4 @@
-name: Build EchoStrike (both APKs)
+name: Build EchoStrike (Player + Developer Console + Server)
 
 on:
   workflow_dispatch:
@@ -69,9 +69,9 @@ jobs:
           yes | "$SDKM" --licenses >/dev/null 2>&1 || true
           "$SDKM" "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Build both APKs
+      - name: Build all three APKs
         working-directory: ${{ env.PROJECT_DIR }}
-        run: gradle --no-daemon --stacktrace :app:assembleDebug :developer-console:assembleDebug
+        run: gradle --no-daemon --stacktrace :app:assembleDebug :developer-console:assembleDebug :server-app:assembleDebug
 
       - name: Collect the APKs
         shell: bash
@@ -79,9 +79,10 @@ jobs:
           mkdir -p out
           cp "$PROJECT_DIR"/app/build/outputs/apk/debug/*.apk out/EchoStrike-Player.apk
           cp "$PROJECT_DIR"/developer-console/build/outputs/apk/debug/*.apk out/EchoStrike-Developer-Console.apk
+          cp "$PROJECT_DIR"/server-app/build/outputs/apk/debug/*.apk out/EchoStrike-Server.apk
           ls -l out
 
-      - name: Upload both APKs
+      - name: Upload the APKs
         uses: actions/upload-artifact@v4
         with:
           name: EchoStrike-APKs
@@ -95,4 +96,4 @@ jobs:
           TAG: ${{ github.event.inputs.release_tag }}
         run: |
           gh release create "$TAG" out/*.apk --title "EchoStrike $TAG" \
-            --notes "Player app and Developer Console. Install both from the same release."
+            --notes "Player = the game. Server = run on a second phone or tablet to host the world. Developer Console = optional admin tool. All three are signed with the same key, so they install over older versions."
